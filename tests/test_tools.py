@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tools import GitRepository, RepositoryError, normalize_github_url, redact_secrets, summarize_workflow
+from tools import GitRepository, RepositoryError, normalize_github_url, redact_secrets, summarize_workflow, tracked_file_concern
 
 
 class UrlTests(unittest.TestCase):
@@ -38,6 +38,7 @@ class RedactionTests(unittest.TestCase):
         self.assertIn("your-api-key", redact_secrets("OPENAI_API_KEY=your-api-key"))
         self.assertIn("request.headers", redact_secrets("token = request.headers.get('X-Token')"))
         self.assertIn("secrets.NPM_TOKEN", redact_secrets("NPM_TOKEN: ${{ secrets.NPM_TOKEN }}"))
+        self.assertEqual(redact_secrets("id-token: write"), "id-token: write")
 
 
 class PathTests(unittest.TestCase):
@@ -142,6 +143,56 @@ def make_git_repo(root: Path, files: dict[str, str]) -> GitRepository:
     for command in (["init", "-q"], ["add", "."], ["-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "init"]):
         subprocess.run(["git", "-C", str(source), *command], check=True, capture_output=True)
     return GitRepository("https://github.com/example/project", source)
+
+
+def commit(repo: GitRepository, files: dict[str, str], message: str) -> None:
+    for name, content in files.items():
+        (repo.path / name).write_text(content, encoding="utf-8")
+    for command in (["add", "."], ["-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", message]):
+        subprocess.run(["git", "-C", str(repo.path), *command], check=True, capture_output=True)
+
+
+class TrackedFileConcernTests(unittest.TestCase):
+    def test_flags_common_mistakes(self):
+        for path in ("src/__pycache__/a.cpython-312.pyc", ".env", ".env.production", ".DS_Store", "debug.log",
+                     ".vscode/settings.json", "dist/pkg.whl", "keys/id_rsa", "node_modules/x/index.js", ".venv/pyvenv.cfg"):
+            with self.subTest(path=path):
+                self.assertIsNotNone(tracked_file_concern(path))
+
+    def test_ignores_normal_files_and_templates(self):
+        for path in ("README.md", ".env.example", ".env.sample", "src/app.py", ".github/workflows/ci.yml", "docs/build.md"):
+            with self.subTest(path=path):
+                self.assertIsNone(tracked_file_concern(path))
+
+
+@unittest.skipUnless(shutil.which("git"), "git is required")
+class GitBackedToolTests(unittest.TestCase):
+    def test_list_files_reports_flagged_paths(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = make_git_repo(Path(temp), {"app.py": "x = 1\n", "server.log": "started\n"})
+            result = repo.list_files()
+            self.assertEqual(result["flagged"], [{"path": "server.log", "reason": "temporary, backup, or log file"}])
+
+    def test_search_code_supports_regex(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = make_git_repo(Path(temp), {"a.py": "PASSWORD = 'x'\nname = 'y'\nTOKEN: abc\n"})
+            literal = repo.search_code("password|token", regex=False)
+            pattern = repo.search_code("(password|token)\\s*[:=]", regex=True)
+            self.assertEqual(literal["matches"], [])
+            self.assertEqual([m["line"] for m in pattern["matches"]], [1, 3])
+            with self.assertRaises(ValueError):
+                repo.search_code("(unclosed", regex=True)
+
+    def test_search_history_finds_removed_secret_without_revealing_it(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = make_git_repo(Path(temp), {"settings.py": "DB_PASSWORD = 'hunter2'\n"})
+            commit(repo, {"settings.py": "DB_PASSWORD = os.getenv('DB_PASSWORD')\n"}, "use env")
+            result = repo.search_history("password\\s*=")
+            removed = [m for m in result["matches"] if m["change"] == "removed"]
+            self.assertEqual(removed[0]["file"], "settings.py")
+            self.assertTrue(removed[0]["file_still_tracked"])
+            self.assertNotIn("hunter2", json.dumps(result))
+            self.assertIn("[REDACTED]", removed[0]["text"])
 
 
 @unittest.skipUnless(shutil.which("git"), "git is required")

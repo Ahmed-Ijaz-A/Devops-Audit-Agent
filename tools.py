@@ -20,6 +20,9 @@ import yaml
 
 MAX_FILE_BYTES = 80_000
 MAX_SEARCH_MATCHES = 100
+MAX_FLAGGED_FILES = 50
+MAX_HISTORY_COMMITS = 100
+MAX_HISTORY_MATCHES = 40
 MAX_LOG_COMMITS = 40
 MAX_LOG_FILES_PER_COMMIT = 25
 GIT_TIMEOUT_SECONDS = 90
@@ -43,9 +46,10 @@ NOTABLE_WORKFLOW_LINE = re.compile(
 )
 
 TOOL_SCHEMAS = [
-    {"type": "function", "name": "list_files", "description": "List tracked repository paths and identify common project/configuration files.", "parameters": {"type": "object", "properties": {}, "required": [], "additionalProperties": False}, "strict": True},
+    {"type": "function", "name": "list_files", "description": "List tracked repository paths. 'flagged' lists tracked paths that are commonly not meant to be committed (caches, env files, editor settings, keys), with the reason; verify before reporting.", "parameters": {"type": "object", "properties": {}, "required": [], "additionalProperties": False}, "strict": True},
     {"type": "function", "name": "read_file", "description": "Read one tracked text file, with line numbers. Secrets are redacted and large files are capped.", "parameters": {"type": "object", "properties": {"path": {"type": "string", "description": "Repository-relative path from list_files"}}, "required": ["path"], "additionalProperties": False}, "strict": True},
-    {"type": "function", "name": "search_code", "description": "Search all tracked text files (including dotfiles and .github) for a literal case-insensitive pattern; results include file and line.", "parameters": {"type": "object", "properties": {"pattern": {"type": "string", "description": "Literal search text, maximum 200 characters"}}, "required": ["pattern"], "additionalProperties": False}, "strict": True},
+    {"type": "function", "name": "search_code", "description": "Case-insensitive search of all tracked text files (including dotfiles and .github); results include file and line. Set regex=true to use an extended regular expression such as (password|secret|token)\\s*[:=].", "parameters": {"type": "object", "properties": {"pattern": {"type": "string", "description": "Search text or regular expression, maximum 200 characters"}, "regex": {"type": "boolean", "description": "true to treat pattern as an extended regular expression, false for literal text"}}, "required": ["pattern", "regex"], "additionalProperties": False}, "strict": True},
+    {"type": "function", "name": "search_history", "description": "Search the diffs of recent commits for a case-insensitive extended regular expression. Shows lines that commits added or removed, so it finds credentials deleted from the code that remain in git history.", "parameters": {"type": "object", "properties": {"pattern": {"type": "string", "description": "Extended regular expression, maximum 200 characters, e.g. (password|secret|token|api_?key)\\s*[:=]"}}, "required": ["pattern"], "additionalProperties": False}, "strict": True},
     {"type": "function", "name": "git_log", "description": "Inspect the 20 most recent commits: hash, date, subject, and changed file paths (useful for files committed then removed).", "parameters": {"type": "object", "properties": {}, "required": [], "additionalProperties": False}, "strict": True},
     {"type": "function", "name": "inspect_workflows", "description": "Parse every GitHub Actions workflow: triggers, permissions, jobs, steps, action pinning, referenced secret names, and notable lines with line numbers.", "parameters": {"type": "object", "properties": {}, "required": [], "additionalProperties": False}, "strict": True},
     {"type": "function", "name": "run_ruff", "description": "Run the ruff linter statically over the repository's Python files (no code is executed). Uses the repository's ruff configuration when present, otherwise ruff defaults.", "parameters": {"type": "object", "properties": {}, "required": [], "additionalProperties": False}, "strict": True},
@@ -79,6 +83,42 @@ def _is_dotenv(path: str) -> bool:
     return PurePosixPath(path).name.lower() in DOTENV_NAMES
 
 
+ENV_TEMPLATE_SUFFIXES = {"example", "sample", "template", "dist", "default", "defaults"}
+TOOL_CACHE_DIRS = {".pytest_cache", ".ruff_cache", ".mypy_cache", ".tox", ".nox", ".hypothesis", ".ipynb_checkpoints"}
+
+
+def tracked_file_concern(path: str) -> str | None:
+    """A reason this tracked path is often committed by mistake, or None. A hint for the model, not a verdict."""
+    parts = PurePosixPath(path).parts
+    name = parts[-1]
+    lower = name.lower()
+    suffix = PurePosixPath(lower).suffix
+    directories = set(parts[:-1])
+    if "__pycache__" in directories or suffix in {".pyc", ".pyo"}:
+        return "Python bytecode cache"
+    if "node_modules" in directories:
+        return "installed dependencies"
+    if directories & {".venv", "venv"} or lower == "pyvenv.cfg":
+        return "virtual environment"
+    if lower in {".ds_store", "thumbs.db", "desktop.ini"}:
+        return "operating-system metadata file"
+    if lower == ".env" or (lower.startswith(".env.") and lower.rsplit(".", 1)[-1] not in ENV_TEMPLATE_SUFFIXES):
+        return "environment file (may contain secrets)"
+    if suffix in {".log", ".tmp", ".swp", ".swo", ".bak", ".orig"} or lower.endswith("~"):
+        return "temporary, backup, or log file"
+    if directories & TOOL_CACHE_DIRS or lower in {".coverage", "coverage.xml"}:
+        return "tool cache or coverage output"
+    if directories & {".idea", ".vscode"}:
+        return "local editor settings (sometimes shared on purpose)"
+    if any(p.endswith(".egg-info") for p in parts) or (parts[0] in {"dist", "build"} and len(parts) > 1):
+        return "build output"
+    if suffix in {".pem", ".key", ".p12", ".pfx", ".jks", ".keystore"} or lower in {"id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"}:
+        return "private key or certificate (could be a test fixture)"
+    if suffix in {".sqlite", ".sqlite3", ".db"}:
+        return "local database file"
+    return None
+
+
 def redact_secrets(value: str) -> str:
     """Mask likely credential values before model, trace, or report use."""
     text = value
@@ -86,6 +126,9 @@ def redact_secrets(value: str) -> str:
     environment_refs = ("os.environ", "os.getenv", "getenv", "process.env", "env", "none", "null", "true", "false")
     def mask_assignment(match: re.Match[str]) -> str:
         candidate = match.group(3).strip().strip("'\"").casefold()
+        # GitHub Actions permission values (id-token: write, contents: read) are settings, not secrets.
+        if candidate in {"read", "write", "none", "read-all", "write-all"}:
+            return match.group(0)
         if candidate.startswith(environment_refs) or candidate.startswith(("${", "$", "%(", "{{")) or PLACEHOLDER.match(candidate):
             return match.group(0)
         # An unquoted value that is code (a call, attribute, or subscript) is not a literal credential.
@@ -168,7 +211,11 @@ class GitRepository:
         output = self._git("ls-tree", "-r", "--name-only", "-z", "HEAD")
         self._files = [item.decode("utf-8", "replace") for item in output.encode("utf-8", "surrogateescape").split(b"\0") if item]
         names = self._files[:3000]
-        return {"count": len(self._files), "truncated": len(self._files) > len(names), "files": names}
+        flagged = [{"path": path, "reason": reason} for path in self._files if (reason := tracked_file_concern(path))]
+        return {
+            "count": len(self._files), "truncated": len(self._files) > len(names), "files": names,
+            "flagged": flagged[:MAX_FLAGGED_FILES], "flagged_total": len(flagged),
+        }
 
     def _tracked_path(self, raw_path: str) -> str:
         path = raw_path.replace("\\", "/")
@@ -216,11 +263,15 @@ class GitRepository:
         raw = self._git("show", f"HEAD:{safe_path}").encode("utf-8", "surrogateescape")
         return raw.count(b"\n") + (1 if raw and not raw.endswith(b"\n") else 0)
 
-    def search_code(self, pattern: str) -> dict[str, Any]:
+    def search_code(self, pattern: str, regex: bool = False) -> dict[str, Any]:
         if not isinstance(pattern, str) or not pattern or len(pattern) > 200:
             raise ValueError("pattern must contain 1 to 200 characters")
         # git grep searches every tracked text file (dotfiles included) in one process; exit code 1 means no match.
-        output = self._git("grep", "-z", "-n", "-I", "-i", "-F", "-e", pattern, "HEAD", "--", timeout=60, ok_codes=(0, 1))
+        mode = "-E" if regex else "-F"
+        try:
+            output = self._git("grep", "-z", "-n", "-I", "-i", mode, "-e", pattern, "HEAD", "--", timeout=60, ok_codes=(0, 1))
+        except RepositoryError as exc:
+            raise ValueError(f"search failed (check the regular expression): {exc}") from exc
         matches: list[dict[str, Any]] = []
         truncated = False
         for record in output.split("\n"):
@@ -251,6 +302,44 @@ class GitRepository:
                     "files_changed_total": len(changed),
                 })
         return {"commits": commits}
+
+    def search_history(self, pattern: str) -> dict[str, Any]:
+        """Lines matching a regex that commits added (+) or removed (-), including values later deleted from the code."""
+        if not isinstance(pattern, str) or not pattern or len(pattern) > 200:
+            raise ValueError("pattern must contain 1 to 200 characters")
+        try:
+            matcher = re.compile(pattern, re.IGNORECASE)
+        except re.error as exc:
+            raise ValueError(f"invalid regular expression: {exc}") from exc
+        try:
+            output = self._git(
+                "log", f"-{MAX_HISTORY_COMMITS}", "-E", "-i", f"-G{pattern}", "-p", "-U0", "--no-color", "--no-ext-diff",
+                "--no-textconv", "--date=short", "--format=\x1e%h %ad", timeout=60,
+            )
+        except RepositoryError as exc:
+            raise ValueError(f"history search failed (check the regular expression): {exc}") from exc
+        matches: list[dict[str, Any]] = []
+        commit, path = "", ""
+        for line in output.split("\n"):
+            if line.startswith("\x1e"):
+                commit = line[1:].strip()
+            elif line.startswith("+++ "):
+                path = line[4:].removeprefix("b/")
+            elif line.startswith("--- ") or line.startswith("@@"):
+                continue
+            elif line[:1] in "+-" and line and matcher.search(line[1:]):
+                text = "[REDACTED]" if _is_dotenv(path) else redact_secrets(line[1:].strip())
+                matches.append({"commit": commit, "file": path, "change": "added" if line[0] == "+" else "removed", "text": text[:300]})
+                if len(matches) >= MAX_HISTORY_MATCHES:
+                    break
+        present = set(self._files if self._files is not None else self.list_files()["files"])
+        for match in matches:
+            match["file_still_tracked"] = match["file"] in present
+        return {
+            "commits_searched": f"up to {MAX_HISTORY_COMMITS} most recent (clone history is limited)",
+            "matches": matches, "truncated": len(matches) >= MAX_HISTORY_MATCHES,
+            "note": "'removed' lines no longer exist at HEAD but remain readable in git history.",
+        }
 
     def inspect_workflows(self) -> dict[str, Any]:
         files = self._files if self._files is not None else self.list_files()["files"]
@@ -413,7 +502,9 @@ class GitRepository:
         if name == "read_file":
             return self.read_file(args["path"])
         if name == "search_code":
-            return self.search_code(args["pattern"])
+            return self.search_code(args["pattern"], bool(args.get("regex", False)))
+        if name == "search_history":
+            return self.search_history(args["pattern"])
         no_argument_tools = {
             "git_log": self.git_log,
             "inspect_workflows": self.inspect_workflows,
