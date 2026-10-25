@@ -26,6 +26,16 @@ class RedactionTests(unittest.TestCase):
     def test_masks_literal_credentials(self):
         self.assertNotIn("supersecret", redact_secrets('API_TOKEN="supersecret"'))
 
+    def test_masks_whole_quoted_values_and_subscript_keys(self):
+        masked = redact_secrets("app.secret_key = 'part one R~X@H!jm/,?KT'\napp.config['SECRET_KEY_HMAC_2'] = 'am0r3C0mpl3x'")
+        for fragment in ("part one", "R~X@H", "KT'", "am0r3C0mpl3x"):
+            self.assertNotIn(fragment, masked)
+        self.assertEqual(masked.count("[REDACTED]"), 2)
+        self.assertIn("app.config['SECRET_KEY_HMAC_2'] = '[REDACTED]'", masked)
+
+    def test_does_not_treat_comparisons_as_assignments(self):
+        self.assertEqual(redact_secrets("if password == expected:"), "if password == expected:")
+
     def test_masks_prefixed_keys_and_json_keys(self):
         for text in ('DB_PASSWORD="hunter2"', "NPM_TOKEN: hunter2", 'aws_secret_access_key = "hunter2"', '{"password": "hunter2"}'):
             with self.subTest(text=text):

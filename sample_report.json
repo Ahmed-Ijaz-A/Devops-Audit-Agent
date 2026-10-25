@@ -1,4 +1,35 @@
 {
-  "repository": "https://github.com/example/healthy-project",
-  "violations": []
+  "repository": "https://github.com/we45/Vulnerable-Flask-App",
+  "violations": [
+    {
+      "rule_id": "CI-004",
+      "category": "ci_cd",
+      "severity": "medium",
+      "file": ".github/workflows/zap_test.yml",
+      "line": 49,
+      "description": "Action uses a mutable branch reference (master) instead of an immutable hash or version tag.",
+      "evidence": "uses: jakejarvis/wait-action@master",
+      "recommendation": "Pin the action to an immutable commit SHA or release tag."
+    },
+    {
+      "rule_id": "HYG-003",
+      "category": "repository_hygiene",
+      "severity": "low",
+      "file": ".vscode/settings.json",
+      "line": null,
+      "description": "IDE local settings file is tracked in version control.",
+      "evidence": ".vscode/settings.json is present in tracked files.",
+      "recommendation": "Remove .vscode/settings.json from git and add it to .gitignore."
+    },
+    {
+      "rule_id": "HYG-003",
+      "category": "repository_hygiene",
+      "severity": "low",
+      "file": "app/test.db",
+      "line": null,
+      "description": "Local SQLite database file is tracked in version control.",
+      "evidence": "app/test.db is present in tracked files.",
+      "recommendation": "Remove app/test.db from git and add it to .gitignore."
+    }
+  ]
 }

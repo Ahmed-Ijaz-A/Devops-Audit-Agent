@@ -1,0 +1,127 @@
+{
+  "repository": "devops-fixture-obvious",
+  "expected": [
+    {
+      "id": "missing-readme",
+      "categories": [
+        "repository_hygiene",
+        "collaboration"
+      ],
+      "file": null,
+      "keywords": [
+        "readme"
+      ]
+    },
+    {
+      "id": "missing-gitignore",
+      "categories": [
+        "repository_hygiene"
+      ],
+      "file": null,
+      "keywords": [
+        "gitignore"
+      ]
+    },
+    {
+      "id": "tracked-bytecode",
+      "categories": [
+        "repository_hygiene"
+      ],
+      "file": "__pycache__/config.cpython-311.pyc",
+      "file_optional": true,
+      "keywords": [
+        "pycache",
+        "pyc",
+        "bytecode",
+        "compiled"
+      ]
+    },
+    {
+      "id": "hardcoded-api-key",
+      "categories": [
+        "security"
+      ],
+      "file": "config.py",
+      "lines": [
+        4
+      ]
+    },
+    {
+      "id": "committed-env-file",
+      "categories": [
+        "security",
+        "configuration",
+        "repository_hygiene"
+      ],
+      "file": ".env"
+    },
+    {
+      "id": "machine-specific-path",
+      "categories": [
+        "configuration"
+      ],
+      "file": "config.py",
+      "lines": [
+        2
+      ]
+    },
+    {
+      "id": "debug-mode",
+      "categories": [
+        "security",
+        "configuration"
+      ],
+      "file": "app.py",
+      "lines": [
+        23
+      ]
+    },
+    {
+      "id": "unpinned-dependencies",
+      "categories": [
+        "dependency_management"
+      ],
+      "file": "requirements.txt"
+    },
+    {
+      "id": "no-tests",
+      "categories": [
+        "testing"
+      ],
+      "file": null,
+      "keywords": [
+        "test"
+      ]
+    },
+    {
+      "id": "no-linting",
+      "categories": [
+        "code_quality"
+      ],
+      "file": null,
+      "keywords": [
+        "lint",
+        "format",
+        "ruff",
+        "flake8"
+      ]
+    },
+    {
+      "id": "no-ci",
+      "categories": [
+        "ci_cd",
+        "testing",
+        "build_release"
+      ],
+      "file": null,
+      "optional": true,
+      "keywords": [
+        "ci",
+        "continuous",
+        "workflow",
+        "pipeline",
+        "github actions"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,229 @@
+{
+  "repository": "devops-fixture-subtle",
+  "expected": [
+    {
+      "id": "ci-skips-pull-requests",
+      "categories": [
+        "ci_cd"
+      ],
+      "file": ".github/workflows/ci.yml",
+      "keywords": [
+        "pull request",
+        "pull_request",
+        "pr",
+        "trigger"
+      ],
+      "lines": [
+        4,
+        5
+      ]
+    },
+    {
+      "id": "workflow-write-all",
+      "categories": [
+        "security",
+        "ci_cd"
+      ],
+      "file": ".github/workflows/ci.yml",
+      "lines": [
+        7
+      ]
+    },
+    {
+      "id": "test-failures-ignored",
+      "categories": [
+        "ci_cd",
+        "testing"
+      ],
+      "file": ".github/workflows/ci.yml",
+      "lines": [
+        22
+      ]
+    },
+    {
+      "id": "pull-request-target-checkout",
+      "categories": [
+        "security",
+        "ci_cd"
+      ],
+      "file": ".github/workflows/pr-triage.yml",
+      "keywords": [
+        "pull_request_target",
+        "checkout",
+        "untrusted",
+        "head"
+      ],
+      "lines": [
+        4,
+        13,
+        15
+      ]
+    },
+    {
+      "id": "script-injection",
+      "categories": [
+        "security",
+        "ci_cd"
+      ],
+      "file": ".github/workflows/pr-triage.yml",
+      "keywords": [
+        "inject",
+        "title",
+        "interpolat",
+        "untrusted"
+      ],
+      "lines": [
+        17
+      ]
+    },
+    {
+      "id": "publish-on-every-push",
+      "categories": [
+        "build_release",
+        "ci_cd"
+      ],
+      "file": ".github/workflows/release.yml",
+      "keywords": [
+        "every push",
+        "each push",
+        "push to main",
+        "gate",
+        "without test",
+        "no test",
+        "approval",
+        "tag",
+        "nightly",
+        "release"
+      ]
+    },
+    {
+      "id": "action-on-branch-ref",
+      "categories": [
+        "ci_cd",
+        "security",
+        "build_release"
+      ],
+      "file": ".github/workflows/release.yml",
+      "keywords": [
+        "master",
+        "branch",
+        "pin",
+        "mutable",
+        "sha"
+      ],
+      "lines": [
+        18
+      ]
+    },
+    {
+      "id": "secret-on-command-line",
+      "categories": [
+        "security",
+        "ci_cd",
+        "build_release"
+      ],
+      "file": ".github/workflows/release.yml",
+      "keywords": [
+        "command line",
+        "command-line",
+        "-p",
+        "argument",
+        "log",
+        "process",
+        "password"
+      ],
+      "lines": [
+        23
+      ]
+    },
+    {
+      "id": "secret-in-history",
+      "categories": [
+        "security"
+      ],
+      "file": "billing/settings.py",
+      "file_optional": true,
+      "keywords": [
+        "history",
+        "commit",
+        "removed",
+        "previous",
+        "earlier"
+      ]
+    },
+    {
+      "id": "debug-in-production",
+      "categories": [
+        "security",
+        "configuration"
+      ],
+      "file": "config/production.py",
+      "lines": [
+        1
+      ]
+    },
+    {
+      "id": "inconsistent-dependencies",
+      "categories": [
+        "dependency_management"
+      ],
+      "file": "requirements.txt",
+      "alt_files": [
+        "pyproject.toml"
+      ],
+      "keywords": [
+        "inconsist",
+        "conflict",
+        "mismatch",
+        "differ",
+        "disagree",
+        "contradict"
+      ]
+    },
+    {
+      "id": "committed-editor-settings",
+      "categories": [
+        "configuration",
+        "repository_hygiene"
+      ],
+      "file": ".vscode/settings.json"
+    },
+    {
+      "id": "pr-triage-no-permissions",
+      "categories": [
+        "security",
+        "ci_cd"
+      ],
+      "file": ".github/workflows/pr-triage.yml",
+      "optional": true,
+      "keywords": [
+        "permission"
+      ]
+    },
+    {
+      "id": "release-no-permissions",
+      "categories": [
+        "security",
+        "ci_cd",
+        "build_release"
+      ],
+      "file": ".github/workflows/release.yml",
+      "optional": true,
+      "keywords": [
+        "permission"
+      ]
+    },
+    {
+      "id": "gitignore-missing-vscode",
+      "categories": [
+        "repository_hygiene"
+      ],
+      "file": ".gitignore",
+      "optional": true,
+      "keywords": [
+        "vscode",
+        "editor"
+      ]
+    }
+  ]
+}

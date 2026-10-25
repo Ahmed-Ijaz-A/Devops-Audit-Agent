@@ -72,7 +72,7 @@ python agent.py --repo https://github.com/owner/repository --output report.json 
 
 The report has a `repository` URL and a `violations` array. Each finding contains `rule_id`, `category`, `severity`, `file`, `line`, `description`, `evidence`, and `recommendation`. File and line are JSON `null` when inapplicable. A successful audit with no supported issues produces an empty array. Fatal setup, download, model, or report errors exit nonzero and print a useful message to stderr.
 
-`sample_report.json` demonstrates the output shape with an empty findings list. Replace it with the output of a real agent run before submission; no live model call is performed as part of setup.
+`sample_report.json` is unedited agent output from auditing the deliberately vulnerable public repository https://github.com/we45/Vulnerable-Flask-App. It was produced with the free-tier `gemini-3.5-flash-lite` model in 12 tool calls. That small model reported three supported findings and missed others in that repository, such as the hardcoded keys in `app/app.py`; a stronger model investigates more thoroughly.
 
 ## Architecture
 
@@ -116,6 +116,26 @@ python -m ruff check .
 ```
 
 The tests use local temporary Git repositories and mocked model/tool boundaries; they do not need a live API key, network access, or Docker. GitHub Actions (`.github/workflows/ci.yml`) runs lint and tests on Python 3.10 and 3.12 for every push to `main` and every pull request.
+
+## Evaluating precision and recall
+
+`eval/` holds a small harness that mirrors the hidden evaluation with three repositories of known defects:
+
+| Fixture | Contents | Known defects |
+|---|---|---|
+| `devops-fixture-obvious` | No README or .gitignore, hardcoded API key, committed `.env`, tracked bytecode, unpinned requirements, absolute Windows path, debug mode, no tests or linting | 10 |
+| `devops-fixture-subtle` | Push-only CI trigger, `write-all` permissions, `\|\| true` test gate, `pull_request_target` checking out PR code, script injection, publish on every push, action pinned to `@master`, token on a command line, password left in git history, debug in production config, requirements.txt contradicting pyproject.toml, committed editor settings | 12 |
+| `devops-fixture-healthy` | Well-maintained library with traps: `.env.example` placeholders, a dummy token in tests, version ranges in library metadata, SHA-pinned release action | 0 |
+
+Generate the repositories outside this project, push each to a new public GitHub repository with the same name, run the agent on each, and score the reports:
+
+```powershell
+python eval/make_fixtures.py --out ..\audit-fixtures
+python agent.py --repo https://github.com/<you>/devops-fixture-subtle --output report-subtle.json
+python eval/score.py report-obvious.json report-subtle.json report-healthy.json
+```
+
+`eval/score.py` picks each report's answer key from `eval/keys/` by repository name. A finding matches a known defect when its category, file, line (within 3) and, for repository-wide defects, keywords agree. A second finding for the same defect is a duplicate and counts against precision. Some defensible extras are marked optional and are neutral. The answer keys describe only these fixtures; the agent never reads them.
 
 ## Limitations
 

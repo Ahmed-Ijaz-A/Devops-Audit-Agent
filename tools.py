@@ -57,9 +57,18 @@ TOOL_SCHEMAS = [
 
 RUN_PYTEST_SCHEMA = {"type": "function", "name": "run_pytest", "description": "Install the repository's dependencies and run its test suite with pytest inside an isolated Docker container (tests run with networking disabled). Slow; call at most once, after confirming tests exist.", "parameters": {"type": "object", "properties": {}, "required": [], "additionalProperties": False}, "strict": True}
 
+# A secret-named key, optionally with a prefix/suffix (DB_PASSWORD, NPM_TOKEN, aws_secret_access_key), a closing quote
+# (JSON keys) or a closing subscript (config['SECRET_KEY']), then an assignment operator that is not a comparison.
+_SECRET_KEY = (
+    r"\b[\w.-]*?(?:api[_-]?(?:key|token)|access[_-]?key|auth[_-]?token|token|secret|password|passwd|pwd|client[_-]?secret"
+    r"|private[_-]?key|database[_-]?url|connection[_-]?string)[\w.-]*['\"]?\]?\s*(?:[:=](?!=)|=>)\s*"
+)
+ASSIGNMENT_PATTERNS = [
+    # Quoted values are masked up to the closing quote, so values containing spaces or punctuation are fully hidden.
+    re.compile(rf"(?i)({_SECRET_KEY})(['\"])([^'\"\n]*)(['\"])"),
+    re.compile(rf"(?i)({_SECRET_KEY})()([^\s'\",;]+)()"),
+]
 SECRET_PATTERNS = [
-    # Key may carry a prefix/suffix (DB_PASSWORD, NPM_TOKEN, aws_secret_access_key) and a closing quote (JSON keys).
-    re.compile(r"(?i)(\b[\w.-]*?(?:api[_-]?(?:key|token)|access[_-]?key|auth[_-]?token|token|secret|password|passwd|pwd|client[_-]?secret|private[_-]?key|database[_-]?url|connection[_-]?string)[\w.-]*['\"]?\s*[:=]\s*)(['\"]?)([^\s'\",;]+)"),
     re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|sk-[A-Za-z0-9_-]{20,})\b"),
     re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
     re.compile(r"(?im)(\b(?:proxy-)?authorization\s*:\s*bearer\s+)[A-Za-z0-9._~+/-]+=*"),
@@ -122,10 +131,11 @@ def tracked_file_concern(path: str) -> str | None:
 def redact_secrets(value: str) -> str:
     """Mask likely credential values before model, trace, or report use."""
     text = value
-    assignment_pattern = SECRET_PATTERNS[0]
     environment_refs = ("os.environ", "os.getenv", "getenv", "process.env", "env", "none", "null", "true", "false")
     def mask_assignment(match: re.Match[str]) -> str:
-        candidate = match.group(3).strip().strip("'\"").casefold()
+        candidate = match.group(3).strip().casefold()
+        if not candidate:
+            return match.group(0)
         # GitHub Actions permission values (id-token: write, contents: read) are settings, not secrets.
         if candidate in {"read", "write", "none", "read-all", "write-all"}:
             return match.group(0)
@@ -134,9 +144,10 @@ def redact_secrets(value: str) -> str:
         # An unquoted value that is code (a call, attribute, or subscript) is not a literal credential.
         if not match.group(2) and re.match(r"[a-z_][\w]*(?:[.(\[])", candidate):
             return match.group(0)
-        return match.group(1) + match.group(2) + "[REDACTED]"
-    text = assignment_pattern.sub(mask_assignment, text)
-    for pattern in SECRET_PATTERNS[1:]:
+        return match.group(1) + match.group(2) + "[REDACTED]" + match.group(4)
+    for assignment_pattern in ASSIGNMENT_PATTERNS:
+        text = assignment_pattern.sub(mask_assignment, text)
+    for pattern in SECRET_PATTERNS:
         if "PRIVATE KEY" in pattern.pattern:
             text = pattern.sub(lambda match: "[REDACTED PRIVATE KEY]" + "\n" * match.group(0).count("\n"), text)
         elif "authorization" in pattern.pattern:
