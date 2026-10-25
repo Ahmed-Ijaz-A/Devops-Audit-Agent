@@ -1,0 +1,9 @@
+[tool.ruff]
+target-version = "py310"
+line-length = 160
+extend-exclude = [".venv", "venv"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B", "RUF100"]
+# Tests patch instance methods with lambdas on purpose.
+per-file-ignores = { "tests/*" = ["E731"] }

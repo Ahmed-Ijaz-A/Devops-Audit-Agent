@@ -6,7 +6,7 @@ import json
 import re
 from typing import Any
 
-from tools import GitRepository, TOOL_SCHEMAS, redact_secrets
+from tools import RUN_PYTEST_SCHEMA, TOOL_SCHEMAS, GitRepository, redact_secrets
 
 MAX_TOOL_CALLS = 40
 MAX_REQUESTS = MAX_TOOL_CALLS + 5
@@ -32,7 +32,11 @@ Inspect applicable areas, using the file list to direct targeted reads and searc
 - configuration: absolute machine-specific paths, committed IDE/local settings, debug mode enabled in production config, no environment separation.
 - collaboration: unsafe PR automation such as auto-merge without checks; missing contribution guidance only where clearly relevant.
 - build_release: releases/deploys without build or test gates, publishing on every push, deploying from unreviewed branches.
-Read every workflow file under .github/workflows when present.
+Tool guidance:
+- When .github/workflows exists, call inspect_workflows, then read_file a workflow when you need full context for a finding. Judge pinning, permissions, and triggers in context: a tag-pinned first-party action (actions/*) is common practice; an over-broad token or pull_request_target that checks out PR code is not.
+- run_ruff reports static lint results. A few style issues are not a violation. Report code_quality only for meaningful evidence, such as syntax errors, undefined names (F821), or many issues in a repository whose own lint configuration is evidently not enforced in CI.
+- run_pytest (only when offered) executes the tests in a sandbox. Call it at most once and only after confirming tests exist. Report failing tests only when dependencies_installed is true; otherwise say nothing about test results.
+- If a tool reports available: false, the check was not performed; do not report a result for it.
 
 Use rule_id prefixes: HYG, DEP, CQ, TEST, CI, SEC, CFG, COL, BLD followed by a three-digit number (e.g. SEC-001).
 
@@ -222,14 +226,18 @@ def _validate_report(
     return {"repository": repo_url, "violations": normalized}
 
 
-def run_agent(repo_url: str, repo: GitRepository, *, api_key: str, model: str) -> tuple[dict[str, Any], dict[str, Any]]:
+def run_agent(
+    repo_url: str, repo: GitRepository, *, api_key: str, model: str, enable_pytest: bool = False,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """Run bounded model-directed inspection and return report plus trace."""
     client = _make_client(api_key)
+    tools = TOOL_SCHEMAS + ([RUN_PYTEST_SCHEMA] if enable_pytest else [])
+    offered = {tool["name"] for tool in tools}
     input_items: list[dict[str, Any]] = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": f"Inspect this public repository: {repo_url}. Begin by observing its file structure, then investigate relevant areas dynamically."},
     ]
-    trace: dict[str, Any] = {"repository": repo_url, "model": model, "tool_calls": [], "notes": []}
+    trace: dict[str, Any] = {"repository": repo_url, "model": model, "tools_offered": sorted(offered), "tool_calls": [], "notes": []}
     tool_count = 0
     repairs = 0
     finalizing = False
@@ -244,7 +252,7 @@ def run_agent(repo_url: str, repo: GitRepository, *, api_key: str, model: str) -
             response = client.responses.create(
                 model=model,
                 input=input_items,
-                tools=TOOL_SCHEMAS,
+                tools=tools,
                 tool_choice="none" if finalizing else ("required" if tool_count == 0 else "auto"),
             )
         except Exception as exc:
@@ -283,10 +291,12 @@ def run_agent(repo_url: str, repo: GitRepository, *, api_key: str, model: str) -
                     arguments = json.loads(call.arguments)
                     if not isinstance(arguments, dict):
                         raise ValueError("tool arguments must be a JSON object")
+                    if call.name not in offered:
+                        raise ValueError(f"tool '{call.name}' is not available in this run")
                     result = repo.dispatch(call.name, arguments)
                 except Exception as exc:  # Return tool-level errors to the agent for interpretation.
                     result = {"error": str(exc)}
-            safe_result = redact_secrets(json.dumps(result, ensure_ascii=False))
+            safe_result = redact_secrets(json.dumps(result, ensure_ascii=False, default=str))
             safe_arguments = redact_secrets(json.dumps(arguments, ensure_ascii=False))
             trace["tool_calls"].append({"name": call.name, "arguments": safe_arguments, "result": safe_result})
             input_items.append({"type": "function_call_output", "call_id": call.call_id, "output": safe_result})

@@ -7,3 +7,6 @@ __pycache__/
 report.json
 report.json.trace.json
 *.trace.json
+.ruff_cache/
+*.report.json
+test-report.json

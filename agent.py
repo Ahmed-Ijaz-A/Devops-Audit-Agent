@@ -18,6 +18,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--repo", required=True, help="Public GitHub repository URL")
     parser.add_argument("--output", required=True, help="Path for the JSON report")
     parser.add_argument("--trace-output", help="Optional path for a redacted tool-call trace")
+    parser.add_argument(
+        "--sandbox-tests", action="store_true",
+        help="Offer the run_pytest tool, which runs the repository's tests in an isolated Docker container (requires Docker)",
+    )
     return parser.parse_args()
 
 
@@ -57,7 +61,7 @@ def main() -> int:
 
         with tempfile.TemporaryDirectory(prefix="devops-audit-") as temp_dir:
             repo = GitRepository.clone(repo_url, Path(temp_dir) / "repository")
-            report, trace = run_agent(repo_url, repo, api_key=api_key, model=model)
+            report, trace = run_agent(repo_url, repo, api_key=api_key, model=model, enable_pytest=args.sandbox_tests)
 
         output_path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         trace_path.write_text(json.dumps(trace, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

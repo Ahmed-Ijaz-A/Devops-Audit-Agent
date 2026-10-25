@@ -51,7 +51,7 @@ class ReportValidationTests(unittest.TestCase):
     def setUp(self):
         self.repo = GitRepository("https://github.com/example/project", Path("."))
         self.repo._files = ["config.py"]
-        self.repo._git = lambda *args, **kwargs: "API_KEY = os.getenv('API_KEY')\n"  # noqa: E731
+        self.repo._git = lambda *args, **kwargs: "API_KEY = os.getenv('API_KEY')\n"
 
     def test_accepts_empty_report(self):
         self.assertEqual(_validate_report({"violations": []}, self.repo.url, self.repo)["violations"], [])
@@ -100,8 +100,8 @@ class AgentLoopTests(unittest.TestCase):
     def setUp(self):
         self.repo = GitRepository("https://github.com/example/project", Path("."))
         self.repo._files = ["config.py"]
-        self.repo._git = lambda *args, **kwargs: "API_KEY = os.getenv('API_KEY')\n"  # noqa: E731
-        self.repo.dispatch = lambda name, args: {"files": ["config.py"]} if name == "list_files" else {"path": args["path"], "content": "1: safe"}  # noqa: E731
+        self.repo._git = lambda *args, **kwargs: "API_KEY = os.getenv('API_KEY')\n"
+        self.repo.dispatch = lambda name, args: {"files": ["config.py"]} if name == "list_files" else {"path": args["path"], "content": "1: safe"}
 
     def test_agent_uses_follow_up_tool_calls_before_final_report(self):
         responses = [
@@ -135,6 +135,17 @@ class AgentLoopTests(unittest.TestCase):
         self.assertEqual(report["violations"], [])
         self.assertEqual(trace["tool_call_count"], MAX_TOOL_CALLS)
         self.assertEqual(requests[-1]["tool_choice"], "none")
+
+    def test_run_pytest_is_offered_only_when_enabled(self):
+        for enabled in (False, True):
+            requests = []
+            responses = [Response([Item("run_pytest", "{}", "call-1")]), Response(output_text='{"violations": []}')]
+            self.repo.dispatch = lambda name, args: {"available": True, "exit_code": 0}
+            with patch("agent_loop._make_client", return_value=fake_client(responses, requests)):
+                _, trace = run_agent(self.repo.url, self.repo, api_key="test", model="test-model", enable_pytest=enabled)
+            offered = [tool["name"] for tool in requests[0]["tools"]]
+            self.assertEqual("run_pytest" in offered, enabled)
+            self.assertEqual("not available" in trace["tool_calls"][0]["result"], not enabled)
 
     def test_tool_errors_are_returned_to_the_model(self):
         responses = [
